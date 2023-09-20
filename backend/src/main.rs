@@ -1,29 +1,14 @@
-use std::sync::{Arc, Mutex};
-
 use actix_web::{http::StatusCode, web, App, HttpServer};
 use env_logger::Env;
 use responses::{Answer, WebError};
+use sqlx::sqlite::SqlitePoolOptions;
 
+mod db;
 mod responses;
-
-#[derive(Clone, Debug)]
-struct TodoItem {
-    id: u64,
-    title: String,
-    done: bool,
-}
-
-fn render_todo_item(item: &TodoItem) -> TodoOut {
-    TodoOut {
-        id: item.id,
-        title: item.title.clone(),
-        done: item.done,
-    }
-}
 
 #[derive(serde::Serialize)]
 struct TodoOut {
-    id: u64,
+    id: i64,
     title: String,
     done: bool,
 }
@@ -34,34 +19,34 @@ struct TodoIn {
 }
 
 #[derive(Debug, Clone)]
-struct TodoState {
-    todos: Vec<TodoItem>,
-    next_id: u64,
+struct AppState {
+    pool: sqlx::SqlitePool,
 }
 
-#[derive(Debug, Clone)]
-struct AppState(Arc<Mutex<TodoState>>);
-
 #[actix_web::get("/todos")]
-async fn list_todos(data: web::Data<AppState>) -> Answer<Vec<TodoOut>> {
-    let todo_state = Arc::clone(&data.0);
-    let todo_state = &todo_state.lock().unwrap();
-    Answer::Ok(todo_state.todos.iter().map(render_todo_item).collect())
+async fn list_todos(
+    data: web::Data<AppState>,
+) -> Result<Answer<Vec<TodoOut>>, Box<dyn std::error::Error>> {
+    let items = db::list_todos(&data.pool).await?;
+    Ok(Answer::Ok(
+        items
+            .into_iter()
+            .map(|row| TodoOut {
+                id: row.id,
+                title: row.title,
+                done: row.done,
+            })
+            .collect(),
+    ))
 }
 
 #[actix_web::post("/todos")]
-async fn create_todo(data: web::Data<AppState>, todo: web::Json<TodoIn>) -> Answer<u64> {
-    let todo_state = Arc::clone(&data.0);
-    let mut todo_state = todo_state.lock().unwrap();
-    let new_id = todo_state.next_id;
-    todo_state.next_id += 1;
-    todo_state.todos.push(TodoItem {
-        id: new_id,
-        title: todo.0.title,
-        done: false,
-    });
-
-    Answer::Ok(new_id)
+async fn create_todo(
+    data: web::Data<AppState>,
+    todo: web::Json<TodoIn>,
+) -> Result<Answer<i64>, Box<dyn std::error::Error>> {
+    let created_id = db::create_todo(&data.pool, todo.0.title, false).await?;
+    Ok(Answer::Ok(created_id))
 }
 
 pub struct TodoItemNotFound;
@@ -79,65 +64,52 @@ impl WebError for TodoItemNotFound {
 #[actix_web::post("/todos/{id}/mark")]
 async fn mark_todo(
     data: web::Data<AppState>,
-    path: web::Path<u64>,
-) -> Answer<(), TodoItemNotFound> {
-    let todo_id = path.into_inner();
-    let todo_state = Arc::clone(&data.0);
-    let mut todos = todo_state.lock().unwrap();
-
-    if let Some(item) = todos.todos.iter_mut().find(|item| item.id == todo_id) {
-        item.done = true;
-        Answer::Ok(())
-    } else {
-        Answer::Err(TodoItemNotFound)
+    path: web::Path<i64>,
+) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
+    let id = *path;
+    match db::mark_todo(&data.pool, id).await {
+        Ok(()) => Ok(Answer::Ok(())),
+        Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
+        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
     }
 }
 
 #[actix_web::post("/todos/{id}/unmark")]
 async fn unmark_todo(
     data: web::Data<AppState>,
-    path: web::Path<u64>,
-) -> Answer<(), TodoItemNotFound> {
-    let todo_id = path.into_inner();
-    let todo_state = Arc::clone(&data.0);
-    let mut todos = todo_state.lock().unwrap();
-
-    if let Some(item) = todos.todos.iter_mut().find(|item| item.id == todo_id) {
-        item.done = false;
-        Answer::Ok(())
-    } else {
-        Answer::Err(TodoItemNotFound)
+    path: web::Path<i64>,
+) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
+    let id = *path;
+    match db::unmark_todo(&data.pool, id).await {
+        Ok(()) => Ok(Answer::Ok(())),
+        Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
+        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
     }
 }
 
-fn initial_todo_state() -> TodoState {
-    TodoState {
-        todos: vec![
-            TodoItem {
-                id: 1,
-                title: "Procrastinate".into(),
-                done: true,
-            },
-            TodoItem {
-                id: 2,
-                title: "Learn React".into(),
-                done: false,
-            },
-            TodoItem {
-                id: 3,
-                title: "Learn Rust".into(),
-                done: false,
-            },
-        ],
-        next_id: 4,
+#[actix_web::delete("/todos/{id}")]
+async fn delete_todo(
+    data: web::Data<AppState>,
+    path: web::Path<i64>,
+) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
+    let id = *path;
+    match db::delete_todo(&data.pool, id).await {
+        Ok(()) => Ok(Answer::Ok(())),
+        Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
+        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
     }
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    let pool = SqlitePoolOptions::new()
+        .connect(&std::env::var("DATABASE_URL").unwrap())
+        .await
+        .unwrap();
+
     env_logger::init_from_env(Env::default().default_filter_or("info"));
 
-    let data = web::Data::new(AppState(Arc::new(Mutex::new(initial_todo_state()))));
+    let data = web::Data::new(AppState { pool });
 
     HttpServer::new(move || {
         App::new()
@@ -147,6 +119,7 @@ async fn main() -> std::io::Result<()> {
             .service(create_todo)
             .service(mark_todo)
             .service(unmark_todo)
+            .service(delete_todo)
     })
     .workers(4)
     .bind(("127.0.0.1", 8123))?
