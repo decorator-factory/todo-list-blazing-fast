@@ -39,11 +39,11 @@ pub async fn create_todo(
     title: String,
     done: bool,
 ) -> Result<i64, sqlx::Error> {
-    let done_int = if done { 1 } else { 0 };
+    let done = i32::from(done);
     let created_id = sqlx::query!(
         "INSERT INTO todo_items (title, done) VALUES (?, ?) RETURNING id;",
         title,
-        done_int,
+        done,
     )
     .fetch_one(pool)
     .await?
@@ -58,43 +58,34 @@ pub enum UpdateTodoError {
 }
 
 pub async fn delete_todo(pool: &sqlx::SqlitePool, id: i64) -> Result<(), UpdateTodoError> {
-    let deleted_id = sqlx::query!("DELETE FROM todo_items WHERE id = ? RETURNING id;", id)
+    sqlx::query!("DELETE FROM todo_items WHERE id = ? RETURNING id;", id)
         .fetch_optional(pool)
         .await
-        .map_err(UpdateTodoError::SqlError)?;
-
-    match deleted_id {
-        Some(_) => Ok(()),
-        None => Err(UpdateTodoError::NotFound),
-    }
+        .map_err(UpdateTodoError::SqlError)?
+        .map(|_| ())
+        .ok_or(UpdateTodoError::NotFound)
 }
 
 pub async fn mark_todo(pool: &sqlx::SqlitePool, id: i64) -> Result<(), UpdateTodoError> {
-    let updated_id = sqlx::query!(
+    sqlx::query!(
         "UPDATE todo_items SET done = 1 WHERE id = ? RETURNING id;",
         id
     )
     .fetch_optional(pool)
     .await
-    .map_err(UpdateTodoError::SqlError)?;
-
-    match updated_id {
-        Some(_) => Ok(()),
-        None => Err(UpdateTodoError::NotFound),
-    }
+    .map_err(UpdateTodoError::SqlError)?
+    .map(|_| ())
+    .ok_or(UpdateTodoError::NotFound)
 }
 
 pub async fn unmark_todo(pool: &sqlx::SqlitePool, id: i64) -> Result<(), UpdateTodoError> {
-    let updated_id = sqlx::query!(
+    sqlx::query!(
         "UPDATE todo_items SET done = 0 WHERE id = ? RETURNING id;",
         id
     )
     .fetch_optional(pool)
     .await
-    .map_err(UpdateTodoError::SqlError)?;
-
-    match updated_id {
-        Some(_) => Ok(()),
-        None => Err(UpdateTodoError::NotFound),
-    }
+    .map_err(UpdateTodoError::SqlError)?
+    .map(|_| ())
+    .ok_or(UpdateTodoError::NotFound)
 }
