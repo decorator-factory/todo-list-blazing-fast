@@ -1,37 +1,59 @@
-import { Link, Route, Router } from "wouter"
-import {
-    useLocationProperty,
-    navigate,
-    LocationHook,
-} from "wouter/use-location"
+import { TodoList, Item } from "./TodoList"
+import * as remote from "./remote"
+import { useEffect, useState } from "react"
 
-function InboxPage() {
-    return <div>Inbox stuff</div>
-}
+const baseUrl = "/api"
 
-const hashLocation = () => window.location.hash.replace(/^#/, "") || "/"
+export function App() {
+    const [items, setItems] = useState<Item[]>([])
+    const [loading, setLoading] = useState(false)
 
-const hashNavigate = (to: string) => navigate("#" + to)
+    const reloadItems = () => {
+        setLoading(true)
 
-const useHashLocation: LocationHook = () => {
-    const location = useLocationProperty(hashLocation)
-    return [location, hashNavigate]
-}
+        const abort = new AbortController()
+        remote
+            .fetchTodos(baseUrl, abort.signal)
+            .then((answer) => {
+                setLoading(false)
+                if (answer.status === "ok") {
+                    setItems(answer.payload)
+                } else {
+                    console.error(
+                        `Got error on GET /api/todos: ${JSON.stringify(
+                            answer,
+                        )}`,
+                    )
+                }
+            })
+            .catch((reason) => {
+                setLoading(false)
+                console.warn(reason)
+            })
 
-export default function App() {
+        return () => abort.abort()
+    }
+
+    useEffect(reloadItems, [])
+
+    const markItem = async (id: number) => {
+        setLoading(true)
+        await remote.markTodo(baseUrl, id)
+        reloadItems()
+    }
+
+    const unmarkItem = async (id: number) => {
+        setLoading(true)
+        await remote.unmarkTodo(baseUrl, id)
+        reloadItems()
+    }
+
     return (
-        <div>
-            <Router hook={useHashLocation}>
-                <Link href="/users/1">
-                    <a className="link">Profile</a>
-                </Link>
-
-                <Route path="/about">About Us</Route>
-                <Route path="/users/:name">
-                    {(params) => <div>Hello, {params.name}!</div>}
-                </Route>
-                <Route path="/inbox" component={InboxPage} />
-            </Router>
-        </div>
+        <TodoList
+            loading={loading}
+            items={items}
+            markItem={markItem}
+            unmarkItem={unmarkItem}
+        />
     )
 }

@@ -1,4 +1,12 @@
-use actix_web::{http::StatusCode, web, App, HttpServer};
+use std::time::Duration;
+
+use actix_web::{
+    body::MessageBody,
+    dev::{ServiceRequest, ServiceResponse},
+    http::StatusCode,
+    web, App, HttpRequest, HttpServer,
+};
+use actix_web_lab::middleware::Next;
 use env_logger::Env;
 use responses::{Answer, WebError};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -100,6 +108,14 @@ async fn delete_todo(
     }
 }
 
+async fn slow_middleware<B: MessageBody>(
+    req: ServiceRequest,
+    next: Next<B>,
+) -> Result<ServiceResponse<B>, actix_web::Error> {
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    next.call(req).await
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let pool = SqlitePoolOptions::new()
@@ -115,6 +131,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(data.clone())
             .wrap(actix_web::middleware::Logger::default())
+            .wrap(actix_web_lab::middleware::from_fn(slow_middleware))
             .service(list_todos)
             .service(create_todo)
             .service(mark_todo)
