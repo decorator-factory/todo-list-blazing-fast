@@ -58,3 +58,15 @@ export async function unmarkTodo(
     }).then((r) => r.json())
     return apiAnswer(z.null()).parse(json)
 }
+
+export async function deleteTodo(
+    baseUrl: string,
+    id: number,
+    signal: AbortSignal | null = null,
+): Promise<ApiAnswer<null>> {
+    const json = await fetch(`${baseUrl}/todos/${id}`, {
+        method: "DELETE",
+        signal,
+    }).then((r) => r.json())
+    return apiAnswer(z.null()).parse(json)
+}

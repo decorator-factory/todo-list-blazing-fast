@@ -48,12 +48,19 @@ export function App() {
         reloadItems()
     }
 
+    const deleteItem = async (id: number) => {
+        setLoading(true)
+        await remote.deleteTodo(baseUrl, id)
+        reloadItems()
+    }
+
     return (
         <TodoList
             loading={loading}
             items={items}
             markItem={markItem}
             unmarkItem={unmarkItem}
+            deleteItem={deleteItem}
         />
     )
 }

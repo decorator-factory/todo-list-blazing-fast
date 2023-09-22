@@ -8,7 +8,19 @@ export type Props = {
     items: Item[]
     markItem: (id: number) => void
     unmarkItem: (id: number) => void
+    deleteItem: (id: number) => void
     loading: boolean
+}
+
+function CrossButton({ onClick }: { onClick: () => void }) {
+    return (
+        <button
+            className="bg-amber-700 hover:bg-amber-900 text-white content-center w-7 h-7 rounded-lg"
+            onClick={onClick}
+        >
+            x
+        </button>
+    )
 }
 
 export function TodoList(props: Props) {
@@ -33,7 +45,8 @@ export function TodoList(props: Props) {
                         }
                         disabled={props.loading}
                     />
-                    {item.title}
+                    <span>{item.title}</span>
+                    <CrossButton onClick={() => props.deleteItem(item.id)} />
                 </div>
             ))}
         </ul>
