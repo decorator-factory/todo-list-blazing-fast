@@ -1,54 +1,96 @@
+import { useState } from "react"
+
 export type Item = {
     id: number
     title: string
     done: boolean
 }
 
-export type Props = {
-    items: Item[]
+type Actions = {
     markItem: (id: number) => void
     unmarkItem: (id: number) => void
     deleteItem: (id: number) => void
+    createItem: (title: string) => void
+}
+
+export type Props = Actions & {
+    items: Item[]
     loading: boolean
 }
 
-function CrossButton({ onClick }: { onClick: () => void }) {
+export function TodoList({ items, loading, ...actions }: Props) {
+    const [draft, setDraft] = useState("")
+
+    function createItem() {
+        actions.createItem(draft)
+        setDraft("")
+    }
+
+    return (
+        <div className="p-2 flex flex-col">
+            <div className="flex flex-row gap-2">
+                <input
+                    className="border border-slate-600 px-2 py-0.5 w-80"
+                    type="text"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="Buy groceries"
+                />
+                <button
+                    className="
+                    rounded-lg
+                    px-3 py-1
+                    bg-slate-300 text-blue-900
+                    hover:bg-slate-200"
+                    onClick={createItem}
+                >
+                    Add
+                </button>
+            </div>
+            <ul className="flex flex-col max-w-fit p-4 gap-2">
+                {items.map((item) => (
+                    <TodoItem
+                        key={item.id}
+                        {...{ item, loading, ...actions }}
+                    />
+                ))}
+            </ul>
+        </div>
+    )
+}
+
+function DeleteButton({ onClick }: { onClick: () => void }) {
     return (
         <button
-            className="bg-amber-700 hover:bg-amber-900 text-white content-center w-7 h-7 rounded-lg"
+            className="bg-slate-300 hover:bg-slate-200 text-blue-900 content-center rounded-lg px-3 py-1"
             onClick={onClick}
         >
-            x
+            Delete
         </button>
     )
 }
 
-export function TodoList(props: Props) {
+function TodoItem(props: { item: Item; loading: boolean } & Actions) {
     return (
-        <ul className="flex flex-col max-w-fit p-4 gap-2">
-            {props.items.map((item) => (
-                <div
-                    key={item.id}
-                    className="
-                    px-5 py-2
-                    border rounded border-slate-400 hover:shadow cursor-pointer
-                    flex flex-row gap-3
-                    "
-                >
-                    <input
-                        type="checkbox"
-                        checked={item.done}
-                        onChange={() =>
-                            item.done
-                                ? props.unmarkItem(item.id)
-                                : props.markItem(item.id)
-                        }
-                        disabled={props.loading}
-                    />
-                    <span>{item.title}</span>
-                    <CrossButton onClick={() => props.deleteItem(item.id)} />
-                </div>
-            ))}
-        </ul>
+        <div
+            className="
+        px-5 py-2
+        border rounded border-slate-400 hover:shadow cursor-pointer
+        flex flex-row gap-3
+        "
+        >
+            <input
+                type="checkbox"
+                checked={props.item.done}
+                onChange={() =>
+                    props.item.done
+                        ? props.unmarkItem(props.item.id)
+                        : props.markItem(props.item.id)
+                }
+                disabled={props.loading}
+            />
+            <span>{props.item.title}</span>
+            <DeleteButton onClick={() => props.deleteItem(props.item.id)} />
+        </div>
     )
 }

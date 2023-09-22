@@ -54,6 +54,12 @@ export function App() {
         reloadItems()
     }
 
+    const createItem = async (title: string) => {
+        setLoading(true)
+        await remote.createTodo(baseUrl, title)
+        reloadItems()
+    }
+
     return (
         <TodoList
             loading={loading}
@@ -61,6 +67,7 @@ export function App() {
             markItem={markItem}
             unmarkItem={unmarkItem}
             deleteItem={deleteItem}
+            createItem={createItem}
         />
     )
 }

@@ -70,3 +70,17 @@ export async function deleteTodo(
     }).then((r) => r.json())
     return apiAnswer(z.null()).parse(json)
 }
+
+export async function createTodo(
+    baseUrl: string,
+    title: string,
+    signal: AbortSignal | null = null,
+): Promise<ApiAnswer<number>> {
+    const json = await fetch(`${baseUrl}/todos`, {
+        method: "POST",
+        signal,
+        body: JSON.stringify({ title }),
+        headers: { "Content-Type": "application/json" },
+    }).then((r) => r.json())
+    return apiAnswer(z.number()).parse(json)
+}
