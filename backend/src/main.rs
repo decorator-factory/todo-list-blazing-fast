@@ -1,15 +1,15 @@
 use std::time::Duration;
 
-use actix_web::{
-    body::MessageBody,
-    dev::{ServiceRequest, ServiceResponse},
+use axum::{
+    extract::{Json, Path, State},
     http::StatusCode,
-    web, App, HttpRequest, HttpServer,
+    response::ErrorResponse,
+    routing::{delete, get, post},
+    Router,
 };
-use actix_web_lab::middleware::Next;
-use env_logger::Env;
 use responses::{Answer, WebError};
 use sqlx::sqlite::SqlitePoolOptions;
+use tower_http::trace::TraceLayer;
 
 mod db;
 mod responses;
@@ -31,11 +31,11 @@ struct AppState {
     pool: sqlx::SqlitePool,
 }
 
-#[actix_web::get("/todos")]
-async fn list_todos(
-    data: web::Data<AppState>,
-) -> Result<Answer<Vec<TodoOut>>, Box<dyn std::error::Error>> {
-    let items = db::list_todos(&data.pool).await?;
+#[axum::debug_handler]
+async fn list_todos(State(state): State<AppState>) -> axum::response::Result<Answer<Vec<TodoOut>>> {
+    let items = db::list_todos(&state.pool)
+        .await
+        .map_err(|_| ErrorResponse::from(StatusCode::INTERNAL_SERVER_ERROR))?;
     Ok(Answer::Ok(
         items
             .into_iter()
@@ -48,12 +48,13 @@ async fn list_todos(
     ))
 }
 
-#[actix_web::post("/todos")]
 async fn create_todo(
-    data: web::Data<AppState>,
-    todo: web::Json<TodoIn>,
-) -> Result<Answer<i64>, Box<dyn std::error::Error>> {
-    let created_id = db::create_todo(&data.pool, todo.0.title, false).await?;
+    State(data): State<AppState>,
+    Json(todo): Json<TodoIn>,
+) -> axum::response::Result<Answer<i64>> {
+    let created_id = db::create_todo(&data.pool, todo.title, false)
+        .await
+        .map_err(|_| ErrorResponse::from(StatusCode::INTERNAL_SERVER_ERROR))?;
     Ok(Answer::Ok(created_id))
 }
 
@@ -69,77 +70,76 @@ impl WebError for TodoItemNotFound {
     }
 }
 
-#[actix_web::post("/todos/{id}/mark")]
 async fn mark_todo(
-    data: web::Data<AppState>,
-    path: web::Path<i64>,
-) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
-    let id = *path;
-    match db::mark_todo(&data.pool, id).await {
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> axum::response::Result<Answer<(), TodoItemNotFound>> {
+    match db::mark_todo(&state.pool, id).await {
         Ok(()) => Ok(Answer::Ok(())),
         Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
-        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
+        Err(db::UpdateTodoError::SqlError(_)) => {
+            Err(ErrorResponse::from(StatusCode::INTERNAL_SERVER_ERROR))
+        }
     }
 }
 
-#[actix_web::post("/todos/{id}/unmark")]
 async fn unmark_todo(
-    data: web::Data<AppState>,
-    path: web::Path<i64>,
-) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
-    let id = *path;
-    match db::unmark_todo(&data.pool, id).await {
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> axum::response::Result<Answer<(), TodoItemNotFound>> {
+    match db::unmark_todo(&state.pool, id).await {
         Ok(()) => Ok(Answer::Ok(())),
         Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
-        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
+        Err(db::UpdateTodoError::SqlError(_)) => {
+            Err(ErrorResponse::from(StatusCode::INTERNAL_SERVER_ERROR))
+        }
     }
 }
 
-#[actix_web::delete("/todos/{id}")]
 async fn delete_todo(
-    data: web::Data<AppState>,
-    path: web::Path<i64>,
-) -> Result<Answer<(), TodoItemNotFound>, Box<dyn std::error::Error>> {
-    let id = *path;
-    match db::delete_todo(&data.pool, id).await {
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> axum::response::Result<Answer<(), TodoItemNotFound>> {
+    match db::delete_todo(&state.pool, id).await {
         Ok(()) => Ok(Answer::Ok(())),
         Err(db::UpdateTodoError::NotFound) => Ok(Answer::Err(TodoItemNotFound)),
-        Err(db::UpdateTodoError::SqlError(e)) => Err(e.into()),
+        Err(db::UpdateTodoError::SqlError(_)) => {
+            Err(ErrorResponse::from(StatusCode::INTERNAL_SERVER_ERROR))
+        }
     }
 }
 
-async fn slow_middleware<B: MessageBody>(
-    req: ServiceRequest,
-    next: Next<B>,
-) -> Result<ServiceResponse<B>, actix_web::Error> {
+async fn slow_middleware<B>(
+    req: axum::http::Request<B>,
+    next: axum::middleware::Next<B>,
+) -> axum::response::Response {
     tokio::time::sleep(Duration::from_millis(300)).await;
-    next.call(req).await
+    next.run(req).await
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+
     let pool = SqlitePoolOptions::new()
-        .connect(&std::env::var("DATABASE_URL").unwrap())
+        .connect(&std::env::var("DATABASE_URL").expect("Set the DATABASE_URL environment variable"))
         .await
         .unwrap();
 
-    env_logger::init_from_env(Env::default().default_filter_or("info"));
+    let app = Router::new()
+        .route("/todos", get(list_todos))
+        .route("/todos", post(create_todo))
+        .route("/todos/:id/mark", post(mark_todo))
+        .route("/todos/:id/unmark", post(unmark_todo))
+        .route("/todos/:id", delete(delete_todo))
+        .with_state(AppState { pool })
+        .layer(axum::middleware::from_fn(slow_middleware))
+        .layer(TraceLayer::new_for_http());
 
-    let data = web::Data::new(AppState { pool });
-
-    HttpServer::new(move || {
-        App::new()
-            .app_data(data.clone())
-            .wrap(actix_web::middleware::Logger::default())
-            .wrap(actix_web_lab::middleware::from_fn(slow_middleware))
-            .service(list_todos)
-            .service(create_todo)
-            .service(mark_todo)
-            .service(unmark_todo)
-            .service(delete_todo)
-    })
-    .workers(4)
-    .bind(("127.0.0.1", 8123))?
-    .run()
-    .await
+    axum::Server::bind(&"127.0.0.1:8123".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }

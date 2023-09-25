@@ -1,12 +1,12 @@
 use std::convert::Infallible;
 
-use actix_web::{web, Responder};
+use axum::response::IntoResponse;
 
 pub trait WebError {
     fn code(&self) -> &'static str;
 
-    fn status(&self) -> actix_web::http::StatusCode {
-        actix_web::http::StatusCode::BAD_REQUEST
+    fn status(&self) -> axum::http::StatusCode {
+        axum::http::StatusCode::BAD_REQUEST
     }
 
     fn detail(&self) -> serde_json::Value {
@@ -32,28 +32,26 @@ pub enum Answer<T, E = Infallible> {
     Err(E),
 }
 
-impl<T: serde::Serialize, E: WebError> Responder for Answer<T, E> {
-    type Body = <web::Json<T> as Responder>::Body;
-
-    fn respond_to(self, req: &actix_web::HttpRequest) -> actix_web::HttpResponse<Self::Body> {
+impl<T: serde::Serialize, E: WebError> IntoResponse for Answer<T, E> {
+    fn into_response(self) -> axum::response::Response {
         let (body, status) = match self {
             Answer::Ok(value) => (
-                web::Json(serde_json::json!({
+                serde_json::json!({
                     "status": "ok",
                     "payload": value
-                })),
-                actix_web::http::StatusCode::OK,
+                }),
+                axum::http::StatusCode::OK,
             ),
             Answer::Err(e) => (
-                web::Json(serde_json::json!({
+                serde_json::json!({
                     "status": "error",
                     "error": e.code(),
                     "detail": e.detail(),
-                })),
+                }),
                 e.status(),
             ),
         };
 
-        (body, status).respond_to(req)
+        (status, axum::Json(body)).into_response()
     }
 }
